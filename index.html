@@ -1,0 +1,901 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>業主自建 CDN 節點與白名單管理系統</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet" />
+  <style>
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #f1f5f9; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans antialiased">
+
+  <!-- 登入驗證 Modal -->
+  <div id="loginModal" class="fixed inset-0 bg-slate-900/80 backdrop-blur-sm hidden items-center justify-center z-50 p-4">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden p-6 space-y-5 text-center">
+      <div class="w-14 h-14 bg-sky-100 text-sky-600 rounded-2xl mx-auto flex items-center justify-center text-2xl shadow-inner">
+        <i class="fa-solid fa-user-shield"></i>
+      </div>
+      <div>
+        <h2 class="text-xl font-bold text-slate-800">歡迎使用 CDN 管理系統</h2>
+        <p class="text-xs text-slate-500 mt-1">請輸入您的名稱或代號進行登入（系統將自動轉為小寫記錄）。</p>
+      </div>
+      <form onsubmit="handleLogin(event)" class="space-y-4 text-left">
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">操作者名稱 / 員工代號 *</label>
+          <input type="text" id="loginNameInput" required placeholder="例如：Alex / 0842" 
+                 class="w-full border border-slate-300 rounded-lg px-3.5 py-2.5 text-sm focus:ring-2 focus:ring-sky-500 focus:outline-none" />
+        </div>
+        <button type="submit" class="w-full py-3 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-sm font-medium shadow-md transition">
+          進入管理系統
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- 頂部導航列 -->
+  <nav class="bg-slate-900 text-white shadow-md sticky top-0 z-30">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-2">
+      <div class="flex items-center space-x-3 shrink-0">
+        <div class="w-9 h-9 rounded-lg bg-sky-500/20 border border-sky-400/30 flex items-center justify-center">
+          <i class="fa-solid fa-network-wired text-sky-400"></i>
+        </div>
+        <div>
+          <h1 class="text-base sm:text-lg font-bold tracking-wide">業主自建 CDN 節點管理系統</h1>
+          <p class="text-[11px] text-slate-400 hidden lg:block">Google Sheets 雲端即時協作與稽核版</p>
+        </div>
+      </div>
+
+      <div class="flex items-center space-x-2 text-xs sm:text-sm overflow-x-auto py-1">
+        <div class="flex items-center bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 shrink-0 text-slate-300 gap-2">
+          <i class="fa-solid fa-user-check text-emerald-400 text-xs"></i>
+          <span>操作者: <strong id="displayOperator" class="text-white"></strong></span>
+          <button onclick="logout()" class="text-slate-400 hover:text-rose-400 ml-1 text-xs" title="切換帳號"><i class="fa-solid fa-right-from-bracket"></i></button>
+        </div>
+
+        <button onclick="loadDataFromCloud()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-2 rounded-lg transition flex items-center gap-1.5 border border-slate-700 shrink-0" title="重新載入雲端">
+          <i class="fa-solid fa-arrows-rotate text-sky-400"></i>
+          <span class="hidden xl:inline">重新載入</span>
+        </button>
+
+        <label class="cursor-pointer bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded-lg transition flex items-center gap-1.5 shrink-0">
+          <i class="fa-solid fa-file-import text-sky-400"></i>
+          <span class="hidden md:inline">匯入</span>
+          <input type="file" id="fileInput" accept=".json, .xlsx, .xls" class="hidden" />
+        </label>
+
+        <button onclick="exportToExcel()" class="bg-emerald-600 hover:bg-emerald-500 px-3 py-2 rounded-lg transition flex items-center gap-1.5 shadow-sm shrink-0">
+          <i class="fa-solid fa-file-excel"></i>
+          <span class="hidden md:inline">匯出 Excel</span>
+        </button>
+
+        <button id="saveCloudBtn" onclick="saveToCloud(null, false)" class="bg-sky-600 hover:bg-sky-500 px-3 py-2 rounded-lg transition flex items-center gap-1.5 shadow-sm font-medium shrink-0">
+          <i class="fa-brands fa-google-drive"></i>
+          <span>同步雲端</span>
+        </button>
+      </div>
+    </div>
+  </nav>
+
+  <!-- 主內容區 -->
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    
+    <!-- 統計儀表板 -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex items-center justify-between">
+        <div>
+          <p class="text-xs font-medium text-slate-500">總計站點數量</p>
+          <p id="statSites" class="text-2xl font-bold text-slate-800 mt-1">0</p>
+        </div>
+        <div class="w-11 h-11 rounded-xl bg-indigo-50 flex items-center justify-center text-indigo-600">
+          <i class="fa-solid fa-server text-lg"></i>
+        </div>
+      </div>
+      <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex items-center justify-between">
+        <div>
+          <p class="text-xs font-medium text-slate-500">已設定專用 Nginx 白名單</p>
+          <p id="statWhitelist" class="text-2xl font-bold text-emerald-600 mt-1">0</p>
+        </div>
+        <div class="w-11 h-11 rounded-xl bg-emerald-50 flex items-center justify-center text-emerald-600">
+          <i class="fa-solid fa-shield-halved text-lg"></i>
+        </div>
+      </div>
+      <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex items-center justify-between">
+        <div>
+          <p class="text-xs font-medium text-slate-500">未填寫專用白名單站點</p>
+          <p id="statNoWhitelist" class="text-2xl font-bold text-amber-600 mt-1">0</p>
+        </div>
+        <div class="w-11 h-11 rounded-xl bg-amber-50 flex items-center justify-center text-amber-600">
+          <i class="fa-solid fa-circle-exclamation text-lg"></i>
+        </div>
+      </div>
+      <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex items-center justify-between">
+        <div>
+          <p class="text-xs font-medium text-slate-500">業主提交 IP 總條數</p>
+          <p id="statTotalIps" class="text-2xl font-bold text-sky-600 mt-1">0</p>
+        </div>
+        <div class="w-11 h-11 rounded-xl bg-sky-50 flex items-center justify-center text-sky-600">
+          <i class="fa-solid fa-list-ol text-lg"></i>
+        </div>
+      </div>
+    </div>
+
+    <!-- 搜尋與篩選列 -->
+    <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 mb-6 flex flex-col md:flex-row justify-between items-center gap-4">
+      <div class="relative w-full md:w-96">
+        <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3 text-slate-400 text-sm"></i>
+        <input type="text" id="searchInput" oninput="renderTable()" placeholder="搜尋站點代號、IP防護域名、AIP 或任一 IP..." 
+               class="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 text-sm" />
+      </div>
+      <div class="flex flex-wrap items-center gap-3 w-full md:w-auto justify-end">
+        <select id="whitelistFilter" onchange="renderTable()" class="border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-sky-500">
+          <option value="ALL">全部白名單狀態</option>
+          <option value="HAS_WL">已設定專用 Nginx IP</option>
+          <option value="NO_WL">未設定專用 Nginx IP</option>
+        </select>
+        <button onclick="openModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2 shadow-sm">
+          <i class="fa-solid fa-plus"></i>
+          <span>新增站點</span>
+        </button>
+        <button onclick="openDeleteLogsModal()" class="bg-rose-600 hover:bg-rose-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2 shadow-sm">
+          <i class="fa-solid fa-trash-arrow-up"></i>
+          <span>刪除紀錄</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 主資料表格 -->
+    <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+      <div id="loadingIndicator" class="py-12 text-center text-sky-600">
+        <i class="fa-solid fa-spinner fa-spin text-3xl mb-2"></i>
+        <p class="text-sm font-medium">正在從 Google 雲端試算表載入資料...</p>
+      </div>
+      <div class="overflow-x-auto">
+        <table id="mainTable" class="w-full text-left border-collapse hidden">
+          <thead>
+            <tr class="bg-slate-100 text-slate-600 text-xs uppercase tracking-wider border-b border-slate-200">
+              <th onclick="sortData('站點')" class="py-3.5 px-4 font-semibold w-28 cursor-pointer hover:bg-slate-200 transition select-none">
+                <div class="flex items-center justify-between">
+                  <span>站點</span>
+                  <i id="sortIcon_站點" class="fa-solid fa-sort text-slate-400"></i>
+                </div>
+              </th>
+              <th onclick="sortData('IP防護域名')" class="py-3.5 px-4 font-semibold w-56 cursor-pointer hover:bg-slate-200 transition select-none">
+                <div class="flex items-center justify-between">
+                  <span>IP防護域名</span>
+                  <i id="sortIcon_IP防護域名" class="fa-solid fa-sort-up text-sky-600"></i>
+                </div>
+              </th>
+              <th class="py-3.5 px-4 font-semibold w-40">對應 AIP</th>
+              <th class="py-3.5 px-4 font-semibold w-44">白名單 IP (專用 Nginx)</th>
+              <th class="py-3.5 px-4 font-semibold">業主提交 IP 列表</th>
+              <th class="py-3.5 px-4 text-right font-semibold w-36">操作</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody" class="divide-y divide-slate-200 text-sm">
+          </tbody>
+        </table>
+      </div>
+      <div id="emptyState" class="hidden py-12 text-center text-slate-500">
+        <i class="fa-regular fa-folder-open text-4xl mb-3 text-slate-300"></i>
+        <p>目前無符合條件的站點資料</p>
+      </div>
+    </div>
+  </main>
+
+  <!-- 新增/編輯 Modal -->
+  <div id="dataModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs hidden items-center justify-center z-50 p-4">
+    <div class="bg-white rounded-2xl shadow-xl max-w-xl w-full overflow-hidden">
+      <div class="px-6 py-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+        <h3 id="modalTitle" class="text-lg font-bold text-slate-800">新增站點資料</h3>
+        <button onclick="closeModal()" class="text-slate-400 hover:text-slate-600">
+          <i class="fa-solid fa-xmark text-xl"></i>
+        </button>
+      </div>
+      <form id="dataForm" onsubmit="saveRecord(event)" class="p-6 space-y-4 max-h-[80vh] overflow-y-auto">
+        <input type="hidden" id="editIndex" value="-1" />
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">站點代號 *</label>
+            <input type="text" id="fieldSite" required placeholder="例如：COA8C" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-indigo-500 focus:outline-none" />
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">IP防護域名</label>
+            <input type="text" id="fieldShieldDomain" placeholder="例如：shield.example.com" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-indigo-500 focus:outline-none" />
+          </div>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">對應 AIP</label>
+            <input type="text" id="fieldAip" placeholder="例如：114.111.61.253" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-indigo-500 focus:outline-none" />
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">白名單 IP (我們專用 Nginx)</label>
+            <input type="text" id="fieldWhitelist" placeholder="例如：43.206.147.143" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-indigo-500 focus:outline-none" />
+          </div>
+        </div>
+        <div>
+          <div class="flex justify-between items-center mb-1">
+            <label class="block text-xs font-semibold text-slate-600">業主提交 IP（每行一筆）</label>
+            <span id="modalIpCounter" class="text-xs text-slate-400">0 筆</span>
+          </div>
+          <textarea id="fieldClientIps" rows="6" oninput="updateModalIpCount()" placeholder="請輸入 IP，每行一個" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-mono leading-relaxed focus:ring-2 focus:ring-indigo-500 focus:outline-none"></textarea>
+        </div>
+        <div class="pt-4 border-t border-slate-200 flex justify-end gap-3">
+          <button type="button" onclick="closeModal()" class="px-4 py-2 border border-slate-300 rounded-lg text-sm text-slate-600 hover:bg-slate-50">取消</button>
+          <button type="submit" class="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium shadow-sm">確認並同步雲端</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 檢視詳情 Modal -->
+  <div id="viewModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs hidden items-center justify-center z-50 p-4">
+    <div class="bg-white rounded-2xl shadow-xl max-w-2xl w-full overflow-hidden">
+      <div class="px-6 py-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+        <div class="flex items-center gap-2">
+          <span id="viewSiteBadge" class="px-2.5 py-1 rounded-md bg-indigo-600 text-white font-mono font-bold text-sm"></span>
+          <h3 class="text-lg font-bold text-slate-800">站點完整設定檢視</h3>
+        </div>
+        <button onclick="closeViewModal()" class="text-slate-400 hover:text-slate-600">
+          <i class="fa-solid fa-xmark text-xl"></i>
+        </button>
+      </div>
+      <div id="viewContent" class="p-6 space-y-4 max-h-[75vh] overflow-y-auto text-sm"></div>
+      <div class="px-6 py-3 bg-slate-50 border-t border-slate-200 flex justify-between items-center">
+        <button id="copyAllIpsBtn" class="px-3.5 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-xs font-medium flex items-center gap-1.5">
+          <i class="fa-regular fa-copy"></i>
+          <span>一鍵複製所有業主提交 IP</span>
+        </button>
+        <button onclick="closeViewModal()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-sm">關閉</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 站點專屬操作紀錄 Modal -->
+  <div id="logsModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs hidden items-center justify-center z-50 p-4">
+    <div class="bg-white rounded-2xl shadow-xl max-w-4xl w-full overflow-hidden flex flex-col max-h-[85vh]">
+      <div class="px-6 py-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center shrink-0">
+        <div class="flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded-lg bg-amber-100 text-amber-600 flex items-center justify-center">
+            <i class="fa-solid fa-clock-rotate-left"></i>
+          </div>
+          <div>
+            <h3 id="logsModalTitle" class="text-lg font-bold text-slate-800">站點操作紀錄</h3>
+            <p class="text-xs text-slate-500">該站點歷年的所有異動明細與操作人員</p>
+          </div>
+        </div>
+        <button onclick="closeLogsModal()" class="text-slate-400 hover:text-slate-600">
+          <i class="fa-solid fa-xmark text-xl"></i>
+        </button>
+      </div>
+
+      <div class="overflow-y-auto flex-1 p-6">
+        <table class="w-full text-left border-collapse text-xs">
+          <thead class="sticky top-0 bg-slate-100 text-slate-600 uppercase border-b border-slate-200 z-10">
+            <tr>
+              <th class="py-3 px-4 font-semibold w-40">時間</th>
+              <th class="py-3 px-4 font-semibold w-28">操作者</th>
+              <th class="py-3 px-4 font-semibold w-1/3">變更前 (異動欄位)</th>
+              <th class="py-3 px-4 font-semibold w-1/3">變更後 (異動欄位)</th>
+            </tr>
+          </thead>
+          <tbody id="logsTableBody" class="divide-y divide-slate-200">
+          </tbody>
+        </table>
+        <div id="emptyLogsState" class="hidden py-12 text-center text-slate-400 text-sm">
+          此站點尚無任何操作變更紀錄
+        </div>
+      </div>
+
+      <div class="px-6 py-3 bg-slate-50 border-t border-slate-200 flex justify-end shrink-0">
+        <button onclick="closeLogsModal()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-sm">關閉</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 全局刪除紀錄 Modal -->
+  <div id="deleteLogsModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs hidden items-center justify-center z-50 p-4">
+    <div class="bg-white rounded-2xl shadow-xl max-w-5xl w-full overflow-hidden flex flex-col max-h-[85vh]">
+      <div class="px-6 py-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center shrink-0">
+        <div class="flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded-lg bg-rose-100 text-rose-600 flex items-center justify-center">
+            <i class="fa-solid fa-trash-arrow-up"></i>
+          </div>
+          <div>
+            <h3 class="text-lg font-bold text-slate-800">全系統刪除紀錄追溯</h3>
+            <p class="text-xs text-slate-500">記錄所有曾經被刪除的站點與其最後內容，方便進行備份追溯</p>
+          </div>
+        </div>
+        <button onclick="closeDeleteLogsModal()" class="text-slate-400 hover:text-slate-600">
+          <i class="fa-solid fa-xmark text-xl"></i>
+        </button>
+      </div>
+
+      <div class="p-4 bg-slate-50/50 border-b border-slate-200 shrink-0">
+        <div class="relative w-full sm:w-80">
+          <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-slate-400 text-xs"></i>
+          <input type="text" id="deleteLogSearchInput" oninput="renderDeleteLogs()" placeholder="搜尋刪除操作者或站點關鍵字..." 
+                 class="w-full pl-8 pr-3 py-1.5 border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-rose-500" />
+        </div>
+      </div>
+
+      <div class="overflow-y-auto flex-1 p-6">
+        <table class="w-full text-left border-collapse text-xs">
+          <thead class="sticky top-0 bg-slate-100 text-slate-600 uppercase border-b border-slate-200 z-10">
+            <tr>
+              <th class="py-3 px-4 font-semibold w-40">刪除時間</th>
+              <th class="py-3 px-4 font-semibold w-28">操作者</th>
+              <th class="py-3 px-4 font-semibold">被刪除時的完整站點資料內容</th>
+            </tr>
+          </thead>
+          <tbody id="deleteLogsTableBody" class="divide-y divide-slate-200">
+          </tbody>
+        </table>
+        <div id="emptyDeleteLogsState" class="hidden py-12 text-center text-slate-400 text-sm">
+          目前沒有任何刪除紀錄
+        </div>
+      </div>
+
+      <div class="px-6 py-3 bg-slate-50 border-t border-slate-200 flex justify-end shrink-0">
+        <button onclick="closeDeleteLogsModal()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-sm">關閉</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const GAS_API_URL = "https://script.google.com/macros/s/AKfycby2hsPTintsOJUKNypkoHQrFuZqnkPNnjGdwrPQOg-nqvkaa-6GtjKcLOr3hLiMUiaDOw/exec";
+
+    let records = [];
+    let operationLogs = [];
+    
+    // 預設排序改為 IP防護域名 正序
+    let currentSortField = 'IP防護域名';
+    let currentSortAsc = true;
+
+    function checkLogin() {
+      let operator = localStorage.getItem('cdn_operator_name');
+      if (!operator) {
+        document.getElementById('loginModal').classList.remove('hidden');
+        document.getElementById('loginModal').classList.add('flex');
+      } else {
+        operator = operator.toLowerCase();
+        localStorage.setItem('cdn_operator_name', operator);
+        document.getElementById('displayOperator').innerText = operator;
+        loadDataFromCloud();
+      }
+    }
+
+    function handleLogin(e) {
+      e.preventDefault();
+      let name = document.getElementById('loginNameInput').value.trim().toLowerCase();
+      if (name) {
+        localStorage.setItem('cdn_operator_name', name);
+        document.getElementById('displayOperator').innerText = name;
+        document.getElementById('loginModal').classList.add('hidden');
+        document.getElementById('loginModal').classList.remove('flex');
+        loadDataFromCloud();
+      }
+    }
+
+    function logout() {
+      localStorage.removeItem('cdn_operator_name');
+      document.getElementById('loginNameInput').value = '';
+      document.getElementById('loginModal').classList.remove('hidden');
+      document.getElementById('loginModal').classList.add('flex');
+    }
+
+    function formatTimestamp() {
+      const now = new Date();
+      const pad = n => String(n).padStart(2, '0');
+      return `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+    }
+
+    function formatRecordSummary(r) {
+      if (!r) return "(無)";
+      const ipCount = parseIpList(r['業主提交IP']).length;
+      return `站點: ${r['站點'] || '-'}\nIP防護域名: ${r['IP防護域名'] || '-'}\n對應AIP: ${r['對應AIP'] || '-'}\n白名單IP: ${r['白名單IP'] || '-'}\n業主IP數量: ${ipCount} 筆\n${r['業主提交IP'] ? 'IP明細:\n' + r['業主提交IP'] : ''}`.trim();
+    }
+
+    function getDiffSummary(oldObj, newObj) {
+      const fields = ['站點', 'IP防護域名', '對應AIP', '白名單IP', '業主提交IP'];
+      let beforeDiff = [];
+      let afterDiff = [];
+
+      fields.forEach(f => {
+        const valOld = String(oldObj[f] || '').trim();
+        const valNew = String(newObj[f] || '').trim();
+        if (valOld !== valNew) {
+          beforeDiff.push(`${f}: ${valOld || '(空)'}`);
+          afterDiff.push(`${f}: ${valNew || '(空)'}`);
+        }
+      });
+
+      return {
+        before: beforeDiff.length > 0 ? beforeDiff.join('\n') : "(無欄位異動)",
+        after: afterDiff.length > 0 ? afterDiff.join('\n') : "(無欄位異動)"
+      };
+    }
+
+    async function loadDataFromCloud() {
+      const loader = document.getElementById('loadingIndicator');
+      const table = document.getElementById('mainTable');
+      const empty = document.getElementById('emptyState');
+
+      loader.classList.remove('hidden');
+      table.classList.add('hidden');
+      empty.classList.add('hidden');
+
+      try {
+        const res = await fetch(GAS_API_URL);
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          records = data;
+          operationLogs = [];
+        } else {
+          records = Array.isArray(data.records) ? data.records : [];
+          operationLogs = Array.isArray(data.logs) ? data.logs : [];
+        }
+        loader.classList.add('hidden');
+        renderTable();
+      } catch (err) {
+        console.error("載入雲端資料失敗", err);
+        loader.classList.add('hidden');
+        alert("無法連線至 Google 雲端資料庫。");
+      }
+    }
+
+    async function saveToCloud(logEntry = null, silent = true) {
+      const saveBtn = document.getElementById('saveCloudBtn');
+      if (saveBtn) saveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>同步中...</span>';
+      
+      if (logEntry) {
+        operationLogs.unshift(logEntry);
+      }
+
+      try {
+        await fetch(GAS_API_URL, {
+          method: "POST",
+          mode: "no-cors",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            records: records,
+            log: logEntry
+          })
+        });
+        if (!silent) alert("已成功同步並儲存至 Google 雲端試算表！");
+      } catch (err) {
+        console.error("同步失敗", err);
+        alert("儲存至雲端失敗。");
+      } finally {
+        if (saveBtn) saveBtn.innerHTML = '<i class="fa-brands fa-google-drive"></i><span>同步雲端</span>';
+      }
+    }
+
+    function parseIpList(ipStr) {
+      if (!ipStr) return [];
+      return String(ipStr).split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    }
+
+    function escapeHtml(str) {
+      return String(str || '').replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+    }
+
+    function copyText(text, btnEl) {
+      if (!text) return;
+      navigator.clipboard.writeText(text).then(() => {
+        if (btnEl) {
+          const orig = btnEl.innerHTML;
+          btnEl.innerHTML = '<i class="fa-solid fa-check text-emerald-500"></i>';
+          setTimeout(() => btnEl.innerHTML = orig, 1200);
+        }
+      });
+    }
+
+    function updateStats() {
+      document.getElementById('statSites').innerText = records.length;
+      const hasWl = records.filter(r => r['白名單IP'] && String(r['白名單IP']).trim() !== '').length;
+      document.getElementById('statWhitelist').innerText = hasWl;
+      document.getElementById('statNoWhitelist').innerText = records.length - hasWl;
+      const totalIps = records.reduce((acc, r) => acc + parseIpList(r['業主提交IP']).length, 0);
+      document.getElementById('statTotalIps').innerText = totalIps;
+    }
+
+    function sortData(field) {
+      if (currentSortField === field) {
+        if (currentSortAsc) {
+          currentSortAsc = false;
+        } else {
+          if (field === 'IP防護域名') {
+            currentSortAsc = true;
+          } else {
+            currentSortField = 'IP防護域名';
+            currentSortAsc = true;
+          }
+        }
+      } else {
+        currentSortField = field;
+        currentSortAsc = true;
+      }
+      updateSortIcons();
+      renderTable();
+    }
+
+    function updateSortIcons() {
+      const fields = ['站點', 'IP防護域名'];
+      fields.forEach(f => {
+        const icon = document.getElementById(`sortIcon_${f}`);
+        if (!icon) return;
+        if (currentSortField === f) {
+          icon.className = currentSortAsc ? "fa-solid fa-sort-up text-sky-600" : "fa-solid fa-sort-down text-sky-600";
+        } else {
+          icon.className = "fa-solid fa-sort text-slate-400";
+        }
+      });
+    }
+
+    function renderTable() {
+      const search = document.getElementById('searchInput').value.toLowerCase().trim();
+      const wlFilter = document.getElementById('whitelistFilter').value;
+
+      let filtered = records.map((item, idx) => ({ item, idx })).filter(({ item }) => {
+        const matchSearch = !search || ['站點', 'IP防護域名', '對應AIP', '白名單IP', '業主提交IP'].some(k => String(item[k] || '').toLowerCase().includes(search));
+        const hasWl = item['白名單IP'] && String(item['白名單IP']).trim() !== '';
+        const matchWl = wlFilter === 'ALL' || (wlFilter === 'HAS_WL' && hasWl) || (wlFilter === 'NO_WL' && !hasWl);
+        return matchSearch && matchWl;
+      });
+
+      if (currentSortField) {
+        filtered.sort((a, b) => {
+          const valA = String(a.item[currentSortField] || '').toLowerCase();
+          const valB = String(b.item[currentSortField] || '').toLowerCase();
+          if (valA < valB) return currentSortAsc ? -1 : 1;
+          if (valA > valB) return currentSortAsc ? 1 : -1;
+          return 0;
+        });
+      }
+
+      const table = document.getElementById('mainTable');
+      const tbody = document.getElementById('tableBody');
+      const emptyState = document.getElementById('emptyState');
+
+      if (filtered.length === 0) {
+        table.classList.add('hidden');
+        tbody.innerHTML = '';
+        emptyState.classList.remove('hidden');
+      } else {
+        table.classList.remove('hidden');
+        emptyState.classList.add('hidden');
+        tbody.innerHTML = filtered.map(({ item, idx }) => {
+          const ips = parseIpList(item['業主提交IP']);
+          const previewIps = ips.slice(0, 3);
+          const remainCount = ips.length - previewIps.length;
+
+          const shieldHtml = item['IP防護域名']
+            ? `<div class="flex items-center gap-1.5">
+                 <span class="text-indigo-600 font-medium">${escapeHtml(item['IP防護域名'])}</span>
+                 <button onclick="copyText('${escapeHtml(item['IP防護域名'])}', this)" class="text-slate-400 hover:text-indigo-600 transition" title="複製 IP防護域名"><i class="fa-regular fa-copy"></i></button>
+               </div>`
+            : `<span class="text-slate-400">-</span>`;
+
+          const aipHtml = item['對應AIP']
+            ? `<div class="flex items-center gap-1.5">
+                 <span>${escapeHtml(item['對應AIP'])}</span>
+                 <button onclick="copyText('${escapeHtml(item['對應AIP'])}', this)" class="text-slate-400 hover:text-sky-600 transition" title="複製對應 AIP"><i class="fa-regular fa-copy"></i></button>
+               </div>`
+            : `<span class="text-slate-400">-</span>`;
+
+          const wlHtml = item['白名單IP']
+            ? `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-mono font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+                 ${escapeHtml(item['白名單IP'])}
+                 <button onclick="copyText('${escapeHtml(item['白名單IP'])}', this)" class="text-emerald-500 hover:text-emerald-800 ml-1" title="複製白名單 IP"><i class="fa-regular fa-copy"></i></button>
+               </span>`
+            : `<span class="text-xs text-slate-400">未設定</span>`;
+
+          const ipBadgesHtml = ips.length === 0
+            ? `<span class="text-xs text-slate-400 italic">無</span>`
+            : `<div class="flex flex-wrap items-center gap-1.5">
+                ${previewIps.map(ip => `<span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-mono text-xs border border-slate-200">${escapeHtml(ip)}</span>`).join('')}
+                ${remainCount > 0 ? `<button onclick="viewRecord(${idx})" class="px-2 py-0.5 rounded bg-sky-50 hover:bg-sky-100 text-sky-700 font-medium text-xs border border-sky-200">+${remainCount}</button>` : ''}
+              </div>`;
+
+          return `
+            <tr class="hover:bg-slate-50/80 transition">
+              <td class="py-3.5 px-4 whitespace-nowrap">
+                <span class="px-2.5 py-1 rounded-md bg-indigo-50 text-indigo-700 font-mono font-bold text-xs border border-indigo-100">${escapeHtml(item['站點'])}</span>
+              </td>
+              <td class="py-3.5 px-4 font-mono text-xs whitespace-nowrap">${shieldHtml}</td>
+              <td class="py-3.5 px-4 font-mono text-xs text-slate-700 whitespace-nowrap">${aipHtml}</td>
+              <td class="py-3.5 px-4 whitespace-nowrap">${wlHtml}</td>
+              <td class="py-3.5 px-4">${ipBadgesHtml}</td>
+              <td class="py-3.5 px-4 text-right whitespace-nowrap space-x-1">
+                <button onclick="viewRecord(${idx})" class="text-slate-500 hover:text-sky-600 p-1.5 rounded-lg transition" title="檢視詳情"><i class="fa-solid fa-eye"></i></button>
+                <button onclick="openModal(${idx})" class="text-slate-500 hover:text-indigo-600 p-1.5 rounded-lg transition" title="編輯"><i class="fa-solid fa-pen-to-square"></i></button>
+                <button onclick="deleteRecord(${idx})" class="text-slate-500 hover:text-rose-600 p-1.5 rounded-lg transition" title="刪除"><i class="fa-solid fa-trash"></i></button>
+                <button onclick="openSiteLogs('${escapeHtml(item['站點'])}')" class="text-slate-500 hover:text-amber-600 p-1.5 rounded-lg transition" title="查看該站點操作紀錄"><i class="fa-solid fa-clock-rotate-left"></i></button>
+              </td>
+            </tr>
+          `;
+        }).join('');
+      }
+      updateStats();
+    }
+
+    function updateModalIpCount() {
+      const count = parseIpList(document.getElementById('fieldClientIps').value).length;
+      document.getElementById('modalIpCounter').innerText = `${count} 筆 IP`;
+    }
+
+    function openModal(index = -1) {
+      document.getElementById('editIndex').value = index;
+      document.getElementById('modalTitle').innerText = index === -1 ? '新增站點資料' : `編輯站點：${records[index]['站點']}`;
+      const item = index === -1 ? {} : records[index];
+
+      document.getElementById('fieldSite').value = item['站點'] || '';
+      document.getElementById('fieldShieldDomain').value = item['IP防護域名'] || '';
+      document.getElementById('fieldAip').value = item['對應AIP'] || '';
+      document.getElementById('fieldWhitelist').value = item['白名單IP'] || '';
+      document.getElementById('fieldClientIps').value = item['業主提交IP'] || '';
+      updateModalIpCount();
+
+      document.getElementById('dataModal').classList.remove('hidden');
+      document.getElementById('dataModal').classList.add('flex');
+    }
+
+    function closeModal() {
+      document.getElementById('dataModal').classList.add('hidden');
+      document.getElementById('dataModal').classList.remove('flex');
+    }
+
+    async function saveRecord(e) {
+      e.preventDefault();
+      const operator = (localStorage.getItem('cdn_operator_name') || '未具名').toLowerCase();
+      const index = parseInt(document.getElementById('editIndex').value);
+      const newObj = {
+        '站點': document.getElementById('fieldSite').value.trim(),
+        'IP防護域名': document.getElementById('fieldShieldDomain').value.trim(),
+        '對應AIP': document.getElementById('fieldAip').value.trim(),
+        '白名單IP': document.getElementById('fieldWhitelist').value.trim(),
+        '業主提交IP': document.getElementById('fieldClientIps').value.trim()
+      };
+
+      let diff = {};
+      if (index === -1) {
+        records.unshift(newObj);
+        diff = {
+          before: `【新增站點: ${newObj['站點']}】(無)`,
+          after: Object.entries(newObj).map(([k, v]) => `${k}: ${v || '(空)'}`).join('\n')
+        };
+      } else {
+        const oldObj = records[index];
+        diff = getDiffSummary(oldObj, newObj);
+        diff.before = `【站點: ${newObj['站點']}】\n` + diff.before;
+        diff.after = `【站點: ${newObj['站點']}】\n` + diff.after;
+        records[index] = newObj;
+      }
+
+      const logEntry = {
+        '時間': formatTimestamp(),
+        '操作者': operator,
+        '變更前內容': diff.before,
+        '變更後內容': diff.after
+      };
+
+      renderTable();
+      closeModal();
+      await saveToCloud(logEntry, true);
+    }
+
+    function viewRecord(index) {
+      const item = records[index];
+      const ips = parseIpList(item['業主提交IP']);
+      document.getElementById('viewSiteBadge').innerText = item['站點'];
+
+      const content = document.getElementById('viewContent');
+      content.innerHTML = `
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
+          <div>
+            <p class="text-xs text-slate-500">IP防護域名</p>
+            <div class="flex items-center gap-1.5 mt-0.5">
+              <p class="font-mono font-semibold text-indigo-600 break-all">${escapeHtml(item['IP防護域名']) || '-'}</p>
+              ${item['IP防護域名'] ? `<button onclick="copyText('${escapeHtml(item['IP防護域名'])}', this)" class="text-slate-400 hover:text-indigo-600" title="複製 IP防護域名"><i class="fa-regular fa-copy"></i></button>` : ''}
+            </div>
+          </div>
+          <div>
+            <p class="text-xs text-slate-500">對應 AIP</p>
+            <div class="flex items-center gap-1.5 mt-0.5">
+              <p class="font-mono font-semibold text-slate-800">${escapeHtml(item['對應AIP']) || '-'}</p>
+              ${item['對應AIP'] ? `<button onclick="copyText('${escapeHtml(item['對應AIP'])}', this)" class="text-slate-400 hover:text-sky-600" title="複製對應 AIP"><i class="fa-regular fa-copy"></i></button>` : ''}
+            </div>
+          </div>
+          <div>
+            <p class="text-xs text-slate-500">白名單 IP (專用 Nginx)</p>
+            <div class="flex items-center gap-1.5 mt-0.5">
+              <p class="font-mono font-semibold text-emerald-700">${escapeHtml(item['白名單IP']) || '未設定'}</p>
+              ${item['白名單IP'] ? `<button onclick="copyText('${escapeHtml(item['白名單IP'])}', this)" class="text-slate-400 hover:text-emerald-600" title="複製白名單 IP"><i class="fa-regular fa-copy"></i></button>` : ''}
+            </div>
+          </div>
+        </div>
+        <div>
+          <h4 class="font-semibold text-slate-700 mb-2">業主提交 IP 完整列表（共 ${ips.length} 筆）</h4>
+          ${ips.length === 0 
+            ? '<p class="text-slate-400 italic py-3 text-center bg-slate-50 rounded-lg">無</p>'
+            : `<div class="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-64 overflow-y-auto p-3 bg-slate-900 text-emerald-400 rounded-xl font-mono text-xs">
+                ${ips.map((ip, i) => `<div class="bg-slate-800/80 px-2 py-1 rounded"><span class="text-slate-500 mr-1">${i+1}.</span>${escapeHtml(ip)}</div>`).join('')}
+               </div>`
+          }
+        </div>
+      `;
+
+      const copyBtn = document.getElementById('copyAllIpsBtn');
+      copyBtn.onclick = () => copyText(ips.join('\n'), copyBtn);
+
+      document.getElementById('viewModal').classList.remove('hidden');
+      document.getElementById('viewModal').classList.add('flex');
+    }
+
+    function closeViewModal() {
+      document.getElementById('viewModal').classList.add('hidden');
+      document.getElementById('viewModal').classList.remove('flex');
+    }
+
+    async function deleteRecord(index) {
+      const target = records[index];
+      if (confirm(`確定要刪除站點「${target['站點']}」嗎？`)) {
+        const operator = (localStorage.getItem('cdn_operator_name') || '未具名').toLowerCase();
+        
+        const fullContent = formatRecordSummary(target);
+        const logEntry = {
+          '時間': formatTimestamp(),
+          '操作者': operator,
+          '變更前內容': `【刪除站點：${target['站點']}】\n` + fullContent,
+          '變更後內容': `【刪除站點：${target['站點']}】\n(該站點已被刪除)`
+        };
+
+        records.splice(index, 1);
+        renderTable();
+        await saveToCloud(logEntry, true);
+      }
+    }
+
+    function openSiteLogs(siteName) {
+      document.getElementById('logsModalTitle').innerText = `站點 [${siteName}] 操作紀錄`;
+      
+      const siteLogs = operationLogs.filter(log => {
+        const content = (log['變更前內容'] || '') + ' ' + (log['變更後內容'] || '');
+        return content.includes(siteName);
+      });
+
+      const tbody = document.getElementById('logsTableBody');
+      const emptyState = document.getElementById('emptyLogsState');
+
+      if (siteLogs.length === 0) {
+        tbody.innerHTML = '';
+        emptyState.classList.remove('hidden');
+      } else {
+        emptyState.classList.add('hidden');
+        tbody.innerHTML = siteLogs.map(log => `
+          <tr class="hover:bg-slate-50 align-top">
+            <td class="py-3 px-4 font-mono text-slate-500 whitespace-nowrap">${escapeHtml(log['時間'])}</td>
+            <td class="py-3 px-4 whitespace-nowrap">
+              <span class="px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 font-medium">${escapeHtml(log['操作者'])}</span>
+            </td>
+            <td class="py-3 px-4">
+              <pre class="whitespace-pre-wrap font-mono text-[11px] text-rose-700 bg-rose-50/60 p-2 rounded border border-rose-100 max-h-40 overflow-y-auto">${escapeHtml(log['變更前內容'])}</pre>
+            </td>
+            <td class="py-3 px-4">
+              <pre class="whitespace-pre-wrap font-mono text-[11px] text-emerald-800 bg-emerald-50/60 p-2 rounded border border-emerald-100 max-h-40 overflow-y-auto">${escapeHtml(log['變更後內容'])}</pre>
+            </td>
+          </tr>
+        `).join('');
+      }
+
+      document.getElementById('logsModal').classList.remove('hidden');
+      document.getElementById('logsModal').classList.add('flex');
+    }
+
+    function closeLogsModal() {
+      document.getElementById('logsModal').classList.add('hidden');
+      document.getElementById('logsModal').classList.remove('flex');
+    }
+
+    function openDeleteLogsModal() {
+      renderDeleteLogs();
+      document.getElementById('deleteLogsModal').classList.remove('hidden');
+      document.getElementById('deleteLogsModal').classList.add('flex');
+    }
+
+    function closeDeleteLogsModal() {
+      document.getElementById('deleteLogsModal').classList.add('hidden');
+      document.getElementById('deleteLogsModal').classList.remove('flex');
+    }
+
+    function renderDeleteLogs() {
+      const keyword = document.getElementById('deleteLogSearchInput').value.toLowerCase().trim();
+      
+      const deleteLogs = operationLogs.filter(log => {
+        const before = String(log['變更前內容'] || '').toLowerCase();
+        const operator = String(log['操作者'] || '').toLowerCase();
+        const isDelete = before.includes('【刪除站點');
+        if (!isDelete) return false;
+        if (!keyword) return true;
+        return before.includes(keyword) || operator.includes(keyword);
+      });
+
+      const tbody = document.getElementById('deleteLogsTableBody');
+      const emptyState = document.getElementById('emptyDeleteLogsState');
+
+      if (deleteLogs.length === 0) {
+        tbody.innerHTML = '';
+        emptyState.classList.remove('hidden');
+      } else {
+        emptyState.classList.add('hidden');
+        tbody.innerHTML = deleteLogs.map(log => `
+          <tr class="hover:bg-slate-50 align-top">
+            <td class="py-3 px-4 font-mono text-slate-500 whitespace-nowrap">${escapeHtml(log['時間'])}</td>
+            <td class="py-3 px-4 whitespace-nowrap">
+              <span class="px-2 py-0.5 rounded bg-rose-50 text-rose-800 border border-rose-200 font-medium">${escapeHtml(log['操作者'])}</span>
+            </td>
+            <td class="py-3 px-4">
+              <pre class="whitespace-pre-wrap font-mono text-[11px] text-slate-700 bg-slate-100 p-2.5 rounded border border-slate-200 max-h-48 overflow-y-auto">${escapeHtml(log['變更前內容'])}</pre>
+            </td>
+          </tr>
+        `).join('');
+      }
+    }
+
+    function exportToExcel() {
+      const ws = XLSX.utils.json_to_sheet(records.map(r => ({
+        '站點': r['站點'],
+        'IP防護域名': r['IP防護域名'],
+        '對應AIP': r['對應AIP'],
+        '白名單IP(我們專用nginx)': r['白名單IP'],
+        '業主提交IP': r['業主提交IP']
+      })));
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "業主自建CDN清單");
+      XLSX.writeFile(wb, `業主自建cdn_${new Date().toISOString().slice(0,10)}.xlsx`);
+    }
+
+    document.getElementById('fileInput').addEventListener('change', function(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = async function(evt) {
+        const data = new Uint8Array(evt.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+        const jsonData = XLSX.utils.sheet_to_json(firstSheet, { defval: '' });
+        if (jsonData.length > 0) {
+          const operator = (localStorage.getItem('cdn_operator_name') || '未具名').toLowerCase();
+          const oldCount = records.length;
+          records = jsonData.map(r => ({
+            '站點': r['站點'] || '',
+            'IP防護域名': r['IP防護域名'] || '',
+            '對應AIP': r['對應AIP'] || '',
+            '白名單IP': r['白名單IP(我們專用nginx)'] || r['白名單IP'] || '',
+            '業主提交IP': r['業主提交IP'] || ''
+          }));
+          const logEntry = {
+            '時間': formatTimestamp(),
+            '操作者': operator,
+            '變更前內容': `【批次匯入覆蓋】原本共 ${oldCount} 筆資料`,
+            '變更後內容': `【批次匯入覆蓋】檔案「${file.name}」，共 ${records.length} 筆資料`
+          };
+          renderTable();
+          await saveToCloud(logEntry, false);
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    });
+
+    checkLogin();
+  </script>
+</body>
+</html>
