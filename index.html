@@ -481,18 +481,15 @@
       return String(ipStr).split(/\r?\n/).map(s => s.trim()).filter(Boolean);
     }
 
-    // --- CIDR 網路工具與 IP 比對函式 ---
     function ipToInt(ip) {
       return ip.split('.').reduce((acc, octet) => ((acc << 8) + parseInt(octet, 10)), 0) >>> 0;
     }
 
-    // 判斷某個查詢字串（IP 或 CIDR）是否匹配紀錄中的 IP / CIDR 項目
     function matchIpOrCidr(itemIpEntry, query) {
       itemIpEntry = itemIpEntry.trim();
       query = query.trim();
       if (!itemIpEntry || !query) return false;
 
-      // 如果查詢者輸入的是 CIDR 格式 (例如 192.168.1.0/24)
       if (query.includes('/')) {
         const [qIp, qMask] = query.split('/');
         const maskBits = parseInt(qMask, 10);
@@ -501,7 +498,6 @@
         const netMask = maskBits === 0 ? 0 : (~0 << (32 - maskBits)) >>> 0;
         const targetNet = (qInt & netMask) >>> 0;
 
-        // 判斷項目本身是單一 IP 還是 CIDR
         if (itemIpEntry.includes('/')) {
           const [iIp, iMask] = itemIpEntry.split('/');
           const iBits = parseInt(iMask, 10);
@@ -513,9 +509,7 @@
           const itemInt = ipToInt(itemIpEntry);
           return (itemInt & netMask) >>> 0 === targetNet;
         }
-      } 
-      // 如果查詢者輸入的是單一 IP (例如 192.168.1.50)
-      else {
+      } else {
         const queryInt = ipToInt(query);
         if (itemIpEntry.includes('/')) {
           const [iIp, iMask] = itemIpEntry.split('/');
@@ -529,12 +523,10 @@
       }
     }
 
-    // 擴充搜尋：支援一般文字搜尋與 CIDR/IP 智慧比對
     function matchSearchQuery(item, searchQ) {
       if (!searchQ) return true;
       searchQ = searchQ.toLowerCase();
 
-      // 1. 一般欄位文字包含比對
       const basicFields = ['站點', 'IP防護域名', '對應AIP', '白名單IP'];
       for (let f of basicFields) {
         if (String(item[f] || '').toLowerCase().includes(searchQ)) {
@@ -542,11 +534,9 @@
         }
       }
 
-      // 2. 業主提交 IP 列表逐行比對（支援單一 IP 或 CIDR 查詢）
       const ips = parseIpList(item['業主提交IP']);
       for (let entry of ips) {
         if (entry.toLowerCase().includes(searchQ)) return true;
-        // 若搜尋詞像是 IP 格式或 CIDR，進行網段內含比對
         if (/^(\d{1,3}\.){3}\d{1,3}(\/\d{1,2})?$/.test(searchQ)) {
           if (matchIpOrCidr(entry, searchQ)) return true;
         }
@@ -554,7 +544,6 @@
 
       return false;
     }
-    // ------------------------------------------
 
     function escapeHtml(str) {
       return String(str || '').replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
@@ -772,26 +761,26 @@
 
       const content = document.getElementById('viewContent');
       content.innerHTML = `
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
-          <div>
+        <div class="grid grid-cols-1 sm:grid-cols-12 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
+          <div class="sm:col-span-5">
             <p class="text-xs text-slate-500">IP防護域名</p>
             <div class="flex items-center gap-1.5 mt-0.5">
               <p class="font-mono font-semibold text-indigo-600 break-all">${escapeHtml(item['IP防護域名']) || '-'}</p>
-              ${item['IP防護域名'] ? `<button onclick="copyText('${escapeHtml(item['IP防護域名'])}', this)" class="text-slate-400 hover:text-indigo-600" title="複製 IP防護域名"><i class="fa-regular fa-copy"></i></button>` : ''}
+              ${item['IP防護域名'] ? `<button onclick="copyText('${escapeHtml(item['IP防護域名'])}', this)" class="text-slate-400 hover:text-indigo-600 shrink-0" title="複製 IP防護域名"><i class="fa-regular fa-copy"></i></button>` : ''}
             </div>
           </div>
-          <div>
+          <div class="sm:col-span-3">
             <p class="text-xs text-slate-500">對應 AIP</p>
             <div class="flex items-center gap-1.5 mt-0.5">
-              <p class="font-mono font-semibold text-slate-800">${escapeHtml(item['對應AIP']) || '-'}</p>
-              ${item['對應AIP'] ? `<button onclick="copyText('${escapeHtml(item['對應AIP'])}', this)" class="text-slate-400 hover:text-sky-600" title="複製對應 AIP"><i class="fa-regular fa-copy"></i></button>` : ''}
+              <p class="font-mono font-semibold text-slate-800 break-all">${escapeHtml(item['對應AIP']) || '-'}</p>
+              ${item['對應AIP'] ? `<button onclick="copyText('${escapeHtml(item['對應AIP'])}', this)" class="text-slate-400 hover:text-sky-600 shrink-0" title="複製對應 AIP"><i class="fa-regular fa-copy"></i></button>` : ''}
             </div>
           </div>
-          <div>
+          <div class="sm:col-span-4">
             <p class="text-xs text-slate-500">白名單 IP (專用 Nginx)</p>
             <div class="flex items-center gap-1.5 mt-0.5">
-              <p class="font-mono font-semibold text-emerald-700">${escapeHtml(item['白名單IP']) || '未設定'}</p>
-              ${item['白名單IP'] ? `<button onclick="copyText('${escapeHtml(item['白名單IP'])}', this)" class="text-slate-400 hover:text-emerald-600" title="複製白名單 IP"><i class="fa-regular fa-copy"></i></button>` : ''}
+              <p class="font-mono font-semibold text-emerald-700 break-all">${escapeHtml(item['白名單IP']) || '未設定'}</p>
+              ${item['白名單IP'] ? `<button onclick="copyText('${escapeHtml(item['白名單IP'])}', this)" class="text-slate-400 hover:text-emerald-600 shrink-0" title="複製白名單 IP"><i class="fa-regular fa-copy"></i></button>` : ''}
             </div>
           </div>
         </div>
@@ -947,7 +936,7 @@
         const jsonData = XLSX.utils.sheet_to_json(firstSheet, { defval: '' });
         if (jsonData.length > 0) {
           const operator = (localStorage.getItem('cdn_operator_name') || '未具名').toLowerCase();
-          constoldCount = records.length;
+          const oldCount = records.length;
           records = jsonData.map(r => ({
             '站點': r['站點'] || '',
             'IP防護域名': r['IP防護域名'] || '',
