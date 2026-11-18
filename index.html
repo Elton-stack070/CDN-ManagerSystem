@@ -130,7 +130,7 @@
     <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 mb-6 flex flex-col md:flex-row justify-between items-center gap-4">
       <div class="relative w-full md:w-96">
         <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3 text-slate-400 text-sm"></i>
-        <input type="text" id="searchInput" oninput="renderTable()" placeholder="搜尋站點代號、IP防護域名、AIP 或任一 IP..." 
+        <input type="text" id="searchInput" oninput="renderTable()" placeholder="搜尋站點、網域、AIP 或 IP/CIDR (如 192.168.1.0/24)..." 
                class="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 text-sm" />
       </div>
       <div class="flex flex-wrap items-center gap-3 w-full md:w-auto justify-end">
@@ -222,10 +222,10 @@
         </div>
         <div>
           <div class="flex justify-between items-center mb-1">
-            <label class="block text-xs font-semibold text-slate-600">業主提交 IP（每行一筆）</label>
+            <label class="block text-xs font-semibold text-slate-600">業主提交 IP（每行一筆，支援單一 IP 或 CIDR 網段）</label>
             <span id="modalIpCounter" class="text-xs text-slate-400">0 筆</span>
           </div>
-          <textarea id="fieldClientIps" rows="6" oninput="updateModalIpCount()" placeholder="請輸入 IP，每行一個" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-mono leading-relaxed focus:ring-2 focus:ring-indigo-500 focus:outline-none"></textarea>
+          <textarea id="fieldClientIps" rows="6" oninput="updateModalIpCount()" placeholder="請輸入 IP，每行一個，如 192.168.1.0/24" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-mono leading-relaxed focus:ring-2 focus:ring-indigo-500 focus:outline-none"></textarea>
         </div>
         <div class="pt-4 border-t border-slate-200 flex justify-end gap-3">
           <button type="button" onclick="closeModal()" class="px-4 py-2 border border-slate-300 rounded-lg text-sm text-slate-600 hover:bg-slate-50">取消</button>
@@ -354,8 +354,6 @@
 
     let records = [];
     let operationLogs = [];
-    
-    // 預設排序改為 IP防護域名 正序
     let currentSortField = 'IP防護域名';
     let currentSortAsc = true;
 
@@ -483,6 +481,81 @@
       return String(ipStr).split(/\r?\n/).map(s => s.trim()).filter(Boolean);
     }
 
+    // --- CIDR 網路工具與 IP 比對函式 ---
+    function ipToInt(ip) {
+      return ip.split('.').reduce((acc, octet) => ((acc << 8) + parseInt(octet, 10)), 0) >>> 0;
+    }
+
+    // 判斷某個查詢字串（IP 或 CIDR）是否匹配紀錄中的 IP / CIDR 項目
+    function matchIpOrCidr(itemIpEntry, query) {
+      itemIpEntry = itemIpEntry.trim();
+      query = query.trim();
+      if (!itemIpEntry || !query) return false;
+
+      // 如果查詢者輸入的是 CIDR 格式 (例如 192.168.1.0/24)
+      if (query.includes('/')) {
+        const [qIp, qMask] = query.split('/');
+        const maskBits = parseInt(qMask, 10);
+        if (isNaN(maskBits) || maskBits < 0 || maskBits > 32) return false;
+        const qInt = ipToInt(qIp);
+        const netMask = maskBits === 0 ? 0 : (~0 << (32 - maskBits)) >>> 0;
+        const targetNet = (qInt & netMask) >>> 0;
+
+        // 判斷項目本身是單一 IP 還是 CIDR
+        if (itemIpEntry.includes('/')) {
+          const [iIp, iMask] = itemIpEntry.split('/');
+          const iBits = parseInt(iMask, 10);
+          const iInt = ipToInt(iIp);
+          const iNetMask = iBits === 0 ? 0 : (~0 << (32 - iBits)) >>> 0;
+          const iNet = (iInt & iNetMask) >>> 0;
+          return targetNet === iNet && maskBits === iBits;
+        } else {
+          const itemInt = ipToInt(itemIpEntry);
+          return (itemInt & netMask) >>> 0 === targetNet;
+        }
+      } 
+      // 如果查詢者輸入的是單一 IP (例如 192.168.1.50)
+      else {
+        const queryInt = ipToInt(query);
+        if (itemIpEntry.includes('/')) {
+          const [iIp, iMask] = itemIpEntry.split('/');
+          const iBits = parseInt(iMask, 10);
+          const iInt = ipToInt(iIp);
+          const iNetMask = iBits === 0 ? 0 : (~0 << (32 - iBits)) >>> 0;
+          return (queryInt & iNetMask) >>> 0 === (iInt & iNetMask) >>> 0;
+        } else {
+          return itemIpEntry === query;
+        }
+      }
+    }
+
+    // 擴充搜尋：支援一般文字搜尋與 CIDR/IP 智慧比對
+    function matchSearchQuery(item, searchQ) {
+      if (!searchQ) return true;
+      searchQ = searchQ.toLowerCase();
+
+      // 1. 一般欄位文字包含比對
+      const basicFields = ['站點', 'IP防護域名', '對應AIP', '白名單IP'];
+      for (let f of basicFields) {
+        if (String(item[f] || '').toLowerCase().includes(searchQ)) {
+          return true;
+        }
+      }
+
+      // 2. 業主提交 IP 列表逐行比對（支援單一 IP 或 CIDR 查詢）
+      const ips = parseIpList(item['業主提交IP']);
+      for (let entry of ips) {
+        if (entry.toLowerCase().includes(searchQ)) return true;
+        // 若搜尋詞像是 IP 格式或 CIDR，進行網段內含比對
+        if (/^(\d{1,3}\.){3}\d{1,3}(\/\d{1,2})?$/.test(searchQ)) {
+          if (matchIpOrCidr(entry, searchQ)) return true;
+        }
+      }
+
+      return false;
+    }
+    // ------------------------------------------
+
     function escapeHtml(str) {
       return String(str || '').replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
     }
@@ -541,11 +614,11 @@
     }
 
     function renderTable() {
-      const search = document.getElementById('searchInput').value.toLowerCase().trim();
+      const search = document.getElementById('searchInput').value.trim();
       const wlFilter = document.getElementById('whitelistFilter').value;
 
       let filtered = records.map((item, idx) => ({ item, idx })).filter(({ item }) => {
-        const matchSearch = !search || ['站點', 'IP防護域名', '對應AIP', '白名單IP', '業主提交IP'].some(k => String(item[k] || '').toLowerCase().includes(search));
+        const matchSearch = matchSearchQuery(item, search);
         const hasWl = item['白名單IP'] && String(item['白名單IP']).trim() !== '';
         const matchWl = wlFilter === 'ALL' || (wlFilter === 'HAS_WL' && hasWl) || (wlFilter === 'NO_WL' && !hasWl);
         return matchSearch && matchWl;
@@ -629,7 +702,7 @@
 
     function updateModalIpCount() {
       const count = parseIpList(document.getElementById('fieldClientIps').value).length;
-      document.getElementById('modalIpCounter').innerText = `${count} 筆 IP`;
+      document.getElementById('modalIpCounter').innerText = `${count} 筆`;
     }
 
     function openModal(index = -1) {
@@ -723,7 +796,7 @@
           </div>
         </div>
         <div>
-          <h4 class="font-semibold text-slate-700 mb-2">業主提交 IP 完整列表（共 ${ips.length} 筆）</h4>
+          <h4 class="font-semibold text-slate-700 mb-2">業主提交 IP / CIDR 完整列表（共 ${ips.length} 筆）</h4>
           ${ips.length === 0 
             ? '<p class="text-slate-400 italic py-3 text-center bg-slate-50 rounded-lg">無</p>'
             : `<div class="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-64 overflow-y-auto p-3 bg-slate-900 text-emerald-400 rounded-xl font-mono text-xs">
@@ -874,7 +947,7 @@
         const jsonData = XLSX.utils.sheet_to_json(firstSheet, { defval: '' });
         if (jsonData.length > 0) {
           const operator = (localStorage.getItem('cdn_operator_name') || '未具名').toLowerCase();
-          const oldCount = records.length;
+          constoldCount = records.length;
           records = jsonData.map(r => ({
             '站點': r['站點'] || '',
             'IP防護域名': r['IP防護域名'] || '',
