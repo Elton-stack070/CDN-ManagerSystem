@@ -760,27 +760,21 @@
       document.getElementById('viewSiteBadge').innerText = item['站點'];
 
       const content = document.getElementById('viewContent');
+      // 調整為 2 等分均分欄位（sm:col-span-6），讓 IP防護域名 與 對應 AIP 各佔一半空間，寬敞且互不擠壓
       content.innerHTML = `
-        <div class="grid grid-cols-1 sm:grid-cols-12 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
-          <div class="sm:col-span-5">
-            <p class="text-xs text-slate-500">IP防護域名</p>
-            <div class="flex items-center gap-1.5 mt-0.5">
-              <p class="font-mono font-semibold text-indigo-600 break-all">${escapeHtml(item['IP防護域名']) || '-'}</p>
+        <div class="grid grid-cols-1 sm:grid-cols-12 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200">
+          <div class="sm:col-span-6">
+            <p class="text-xs text-slate-500 mb-1">IP防護域名</p>
+            <div class="flex items-center gap-1.5">
+              <p class="font-mono font-semibold text-indigo-600 break-all text-base">${escapeHtml(item['IP防護域名']) || '-'}</p>
               ${item['IP防護域名'] ? `<button onclick="copyText('${escapeHtml(item['IP防護域名'])}', this)" class="text-slate-400 hover:text-indigo-600 shrink-0" title="複製 IP防護域名"><i class="fa-regular fa-copy"></i></button>` : ''}
             </div>
           </div>
-          <div class="sm:col-span-3">
-            <p class="text-xs text-slate-500">對應 AIP</p>
-            <div class="flex items-center gap-1.5 mt-0.5">
-              <p class="font-mono font-semibold text-slate-800 break-all">${escapeHtml(item['對應AIP']) || '-'}</p>
+          <div class="sm:col-span-6">
+            <p class="text-xs text-slate-500 mb-1">對應 AIP</p>
+            <div class="flex items-center gap-1.5">
+              <p class="font-mono font-semibold text-slate-800 break-all text-base">${escapeHtml(item['對應AIP']) || '-'}</p>
               ${item['對應AIP'] ? `<button onclick="copyText('${escapeHtml(item['對應AIP'])}', this)" class="text-slate-400 hover:text-sky-600 shrink-0" title="複製對應 AIP"><i class="fa-regular fa-copy"></i></button>` : ''}
-            </div>
-          </div>
-          <div class="sm:col-span-4">
-            <p class="text-xs text-slate-500">白名單 IP (專用 Nginx)</p>
-            <div class="flex items-center gap-1.5 mt-0.5">
-              <p class="font-mono font-semibold text-emerald-700 break-all">${escapeHtml(item['白名單IP']) || '未設定'}</p>
-              ${item['白名單IP'] ? `<button onclick="copyText('${escapeHtml(item['白名單IP'])}', this)" class="text-slate-400 hover:text-emerald-600 shrink-0" title="複製白名單 IP"><i class="fa-regular fa-copy"></i></button>` : ''}
             </div>
           </div>
         </div>
